@@ -1,6 +1,6 @@
 import os
 import shutil
-
+import sys
 import markdown
 
 def get_next_issue_number(prefix):
@@ -40,7 +40,7 @@ def process_issue(issue_path, issue_type):
         existing_folders.sort()
         print("Existing folders:")
         for i, folder in enumerate(existing_folders, start=1):
-            first_issue = os.listdir(folder)[0]
+            first_issue = [f for f in os.listdir(folder) if f.lower() != "comment.md"][0]
             with open(os.path.join(folder, first_issue), "r") as file:
                 lines = file.readlines()
             title = lines[4].strip()
@@ -71,13 +71,12 @@ def extract_summary(lines):
          
 
 def main():
-    #thread.start_new_thread(start_server, ())
-    print("Started Webserver in Background thread")
+    
     # Create 'invalid' folder if it doesn't exist
     os.makedirs("invalid", exist_ok=True)
 
     # Get all markdown files in the current directory
-    issues = [file for file in os.listdir() if file.endswith(".md")]
+    issues = [file for file in os.listdir() if file.endswith(".md") and file.lower() != "comment.md"]
 
     if not issues:
         print("No issues found.")
@@ -112,6 +111,36 @@ def main():
 
         print()  # Print a blank line for separation
 
+def restructure(prefix, dry=False):
+    existing_folders = [
+        folder for folder in os.listdir() if folder.startswith(f"{prefix}-")
+    ]
+    existing_folders.sort()
+    nextnum =  get_next_issue_number(prefix)
+    print("Nextnum woud be", nextnum)
+    diff =  nextnum - len(existing_folders)
+    if diff > 1:
+        print("mismatch in numbers for folders") 
+        issuecount =  len(existing_folders)
+        for i in range(1,issuecount):
+            folder_name = f"{prefix}-{i:03d}"
+            if folder_name not in existing_folders:
+                print(folder_name,  "missing")
+                lastfolder = existing_folders.pop()
+                print("renaming",lastfolder, "to", folder_name)
+                if not dry:
+                    shutil.move(lastfolder,folder_name)
+    else:
+        print("No restructure needed")
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "restructure":
+        print("restructure High")
+        restructure("H")
+        print("restructure Med")
+        restructure("M")
+    
+    
     main()
 

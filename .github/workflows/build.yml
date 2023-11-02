@@ -1,0 +1,36 @@
+name: Makefile CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+  
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Setup Go environment
+      uses: actions/setup-go@v4.1.0
+      with:
+        go-version-file: go.mod
+      
+    - name: build
+      run: make build_all
+
+    - name: test
+      run: make test
+
+    - name: Create Release
+      # You may pin to the exact commit or the version.
+      # uses: ncipollo/release-action@6c75be85e571768fa31b40abf38de58ba0397db5
+      uses: ncipollo/release-action@v1.13.0
+      with:
+        artifacts: bin/**
+        # The content type of the artifact. Defaults to raw
+     

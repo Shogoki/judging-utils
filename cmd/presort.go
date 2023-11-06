@@ -5,14 +5,17 @@ package cmd
 
 import (
 	"fmt"
+	"github.com/gomarkdown/markdown"
+	"github.com/gomarkdown/markdown/html"
+	"github.com/gomarkdown/markdown/parser"
+	"github.com/spf13/cobra"
 	"io/fs"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"github.com/spf13/cobra"
 )
 
 // presortCmd represents the presort command
@@ -21,9 +24,20 @@ var presortCmd = &cobra.Command{
 	Short: "Presorting the current judging project",
 	Long:  `This is running the interactive presorting of the current directory`,
 	Run: func(cmd *cobra.Command, args []string) {
-		presort(".")
+		noHttp, err := cmd.Flags().GetBool("no-http")
+		if err != nil {
+			log.Fatal("could not get bool value for flag")
+		}
+        httpPort, err := cmd.Flags().GetInt16("port")
+		if err != nil {
+			log.Fatal("Invalid HTTP Port specified")
+		}
+
+		presort(".", httpPort, !noHttp)
 	},
 }
+
+var CurrentIssue []byte
 
 func init() {
 	rootCmd.AddCommand(presortCmd)
@@ -36,7 +50,8 @@ func init() {
 
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:
-	// presortCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	presortCmd.Flags().BoolP("no-http", "n", false, "do not start HTTP Server")
+    presortCmd.Flags().Int16P("port", "p", 8080, "Port to start the HTTP Server on")
 }
 
 func processIssue(issuePath string, issueType string) {
@@ -111,7 +126,8 @@ func getFirstIssueInfo(folder string) (string, string) {
 	for _, file := range files {
 		if !file.IsDir() && strings.ToLower(file.Name()) != "comment.md" {
 			filePath := filepath.Join(folder, file.Name())
-			lines, err := readLines(filePath)
+			content, err := readBytes(filePath)
+			lines, _ := getLines(content)
 			if err != nil || len(lines) < 5 {
 				continue
 			}
@@ -123,12 +139,15 @@ func getFirstIssueInfo(folder string) (string, string) {
 	return "", ""
 }
 
-func readLines(filePath string) ([]string, error) {
+func readBytes(filePath string) ([]byte, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
 	}
 
+	return data, nil
+}
+func getLines(data []byte) ([]string, error) {
 	lines := strings.Split(string(data), "\n")
 	return lines, nil
 }
@@ -146,30 +165,45 @@ func extractSummary(lines []string) string {
 	return strings.TrimSpace(summary)
 }
 
-func presort(dir string) {
+func presort(dir string,httpPort int16 ,startHTTP bool) {
+
 	// Create 'invalid' folder if it doesn't exist
 	os.Mkdir("invalid", 0755)
 
 	// Get all markdown files in the current directory
 	fsys := os.DirFS(dir)
-	issues, err := fs.Glob(fsys,"[0-9]*.md")
+	issues, err := fs.Glob(fsys, "[0-9]*.md")
 	if err != nil {
 		log.Fatal(err)
 	}
-
 
 	if len(issues) == 0 {
 		fmt.Println("No issues found.")
 		return
 	}
 
+	if startHTTP {
+		http.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+			w.Write(CurrentIssue)
+			w.Write([]byte("<script>setTimeout(() => location.reload(),20000);</script>"))
+		})
+		// Start http server in background
+		go func() {
+            listen:= fmt.Sprintf("localhost:%d",httpPort)
+			fmt.Println("Starting Webserver on " + listen)
+			log.Fatal(http.ListenAndServe(listen, nil))
+		}()
+	}
+
 	sortIssues(issues)
 
 	for _, issue := range issues {
-		lines, err := readLines(issue)
+		issueContent, err := readBytes(issue)
 		if err != nil {
 			log.Fatal(err)
 		}
+		lines, _ := getLines(issueContent)
+		CurrentIssue = mdToHTML(issueContent)
 
 		// auditor := strings.TrimSpace(strings.TrimPrefix(lines[0], "#"))
 		// severity := strings.TrimSpace(lines[2])
@@ -199,4 +233,18 @@ func sortIssues(issues []string) {
 	sort.Slice(issues, func(i, j int) bool {
 		return issues[i] < issues[j]
 	})
+}
+
+func mdToHTML(md []byte) []byte {
+	// create markdown parser with extensions
+	extensions := parser.CommonExtensions | parser.AutoHeadingIDs | parser.NoEmptyLineBeforeBlock
+	p := parser.NewWithExtensions(extensions)
+	doc := p.Parse(md)
+
+	// create HTML renderer with extensions
+	htmlFlags := html.CommonFlags | html.HrefTargetBlank
+	opts := html.RendererOptions{Flags: htmlFlags}
+	renderer := html.NewRenderer(opts)
+
+	return markdown.Render(doc, renderer)
 }
